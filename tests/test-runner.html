@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automated Test Suite — Random Quote Generator</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+    .header {
+      background: #1e293b;
+      padding: 1.5rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 1.5rem;
+    }
+    .summary-badge {
+      display: inline-block;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    .badge-success { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+    .badge-fail { background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; }
+    .test-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .test-item {
+      background: #1e293b;
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      border-left: 5px solid #475569;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .test-item.pass { border-left-color: #10b981; }
+    .test-item.fail { border-left-color: #ef4444; background: #2d1515; }
+    .test-title { font-weight: 600; font-size: 0.95rem; }
+    .test-status { font-weight: 700; font-size: 0.85rem; padding: 0.2rem 0.6rem; border-radius: 4px; }
+    .test-status.pass { background: #064e3b; color: #6ee7b7; }
+    .test-status.fail { background: #7f1d1d; color: #fca5a5; }
+    .test-error { font-size: 0.8rem; color: #fca5a5; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Random Quote Generator — Unit Test Suite</h1>
+    <p>Automated test assertions covering randomization algorithms, boundary edge cases, category filtering, and favorites persistence.</p>
+    <div id="testSummary" class="summary-badge">Running tests...</div>
+  </div>
+
+  <div id="testContainer" class="test-list"></div>
+
+  <script type="module">
+    import { QUOTES_DATABASE } from '../js/quotes-data.js';
+    import { QuoteEngine } from '../js/quote-engine.js';
+
+    const testResults = [];
+    const container = document.getElementById('testContainer');
+    const summary = document.getElementById('testSummary');
+
+    function assert(condition, message) {
+      if (!condition) {
+        throw new Error(message || 'Assertion failed');
+      }
+    }
+
+    function runTest(name, testFn) {
+      try {
+        testFn();
+        testResults.push({ name, passed: true });
+      } catch (err) {
+        testResults.push({ name, passed: false, error: err.message });
+      }
+    }
+
+    // --- TEST EXECUTION ---
+
+    runTest('Dataset Integrity: All quotes have text, author, and category', () => {
+      assert(QUOTES_DATABASE.length >= 10, 'Database should contain a healthy collection of quotes');
+      QUOTES_DATABASE.forEach((q, idx) => {
+        assert(q.id, `Quote at index ${idx} must have an ID`);
+        assert(q.text && q.text.trim().length > 0, `Quote ${q.id} must have non-empty text`);
+        assert(q.author && q.author.trim().length > 0, `Quote ${q.id} must have an author`);
+        assert(q.category && q.category.trim().length > 0, `Quote ${q.id} must have a category`);
+      });
+    });
+
+    runTest('Random Selection: Returns a valid quote from the database', () => {
+      const engine = new QuoteEngine(QUOTES_DATABASE);
+      const quote = engine.getRandomQuote();
+      assert(quote !== null, 'Returned quote must not be null');
+      assert(typeof quote.text === 'string', 'Returned quote must have a string text');
+      assert(typeof quote.author === 'string', 'Returned quote must have an author');
+    });
+
+    runTest('Non-Repeating Engine: Prevents immediate consecutive repetition', () => {
+      const engine = new QuoteEngine(QUOTES_DATABASE);
+      const firstQuote = engine.getRandomQuote();
+      const secondQuote = engine.getRandomQuote();
+      assert(firstQuote.id !== secondQuote.id, 'Consecutive quote selections must be distinct');
+    });
+
+    runTest('Boundary Condition: Single-quote pool handled safely without loops', () => {
+      const singleQuoteData = [{ id: 'solo-1', text: 'Lone quote', author: 'Solo', category: 'General' }];
+      const engine = new QuoteEngine(singleQuoteData);
+      
+      const q1 = engine.getRandomQuote();
+      const q2 = engine.getRandomQuote();
+      assert(q1.id === 'solo-1', 'Must return the lone quote');
+      assert(q2.id === 'solo-1', 'Must safely return the lone quote on subsequent calls without hanging');
+    });
+
+    runTest('Boundary Condition: Empty quote pool returns null gracefully', () => {
+      const engine = new QuoteEngine([]);
+      const result = engine.getRandomQuote();
+      assert(result === null, 'Must return null when pool is empty');
+    });
+
+    runTest('Category Filtering: Filters quotes correctly by category name', () => {
+      const engine = new QuoteEngine(QUOTES_DATABASE);
+      engine.setCategory('Technology');
+      const filtered = engine.getFilteredQuotes();
+      assert(filtered.length > 0, 'Technology category must contain items');
+      filtered.forEach(q => {
+        assert(q.category.toLowerCase() === 'technology', 'All items in filtered list must match category');
+      });
+    });
+
+    runTest('Favorites & Bookmark: Toggles and persists favorites', () => {
+      const engine = new QuoteEngine(QUOTES_DATABASE);
+      const testId = 'q-1';
+      
+      // Ensure clean initial test state
+      if (engine.isFavorite(testId)) {
+        engine.toggleFavorite(testId);
+      }
+      assert(engine.isFavorite(testId) === false, 'Quote should not be favorited initially');
+
+      const isFavNow = engine.toggleFavorite(testId);
+      assert(isFavNow === true, 'Toggling should mark quote as favorited');
+      assert(engine.isFavorite(testId) === true, 'isFavorite should return true');
+
+      const favQuotes = engine.getFavoriteQuotes();
+      assert(favQuotes.some(q => q.id === testId), 'getFavoriteQuotes should include favorited quote');
+
+      const untoggled = engine.toggleFavorite(testId);
+      assert(untoggled === false, 'Toggling again should remove from favorites');
+      assert(engine.isFavorite(testId) === false, 'Quote should no longer be favorited');
+    });
+
+    // --- RENDER RESULTS ---
+    let passedCount = 0;
+    container.innerHTML = '';
+
+    testResults.forEach(res => {
+      if (res.passed) passedCount++;
+      const item = document.createElement('div');
+      item.className = `test-item ${res.passed ? 'pass' : 'fail'}`;
+      item.innerHTML = `
+        <div>
+          <div class="test-title">${res.name}</div>
+          ${res.error ? `<div class="test-error">${res.error}</div>` : ''}
+        </div>
+        <span class="test-status ${res.passed ? 'pass' : 'fail'}">${res.passed ? 'PASSED' : 'FAILED'}</span>
+      `;
+      container.appendChild(item);
+    });
+
+    const allPassed = passedCount === testResults.length;
+    summary.className = `summary-badge ${allPassed ? 'badge-success' : 'badge-fail'}`;
+    summary.textContent = `${passedCount} of ${testResults.length} Tests Passed (${allPassed ? '100% Success' : 'Failures Detected'})`;
+  </script>
+</body>
+</html>
